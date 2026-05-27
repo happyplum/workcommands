@@ -1,26 +1,79 @@
 ---
 description: Audit and clean the .sisyphus workspace while preserving durable knowledge.
+subtask: true
 ---
 
 You are executing the `/cleanup-sisyphus` command.
 
 Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra retention constraints.
 
-Operate as a command-first cleanup workflow. Do not stop at “invoke a cleanup skill”; perform the cleanup protocol directly and prove the result.
+# Sisyphus 清理
 
-Required behavior:
+## 概述
 
-1. Resolve the concrete cleanup target. When `$ARGUMENTS` is empty, default to the workspace `.sisyphus` directory.
-2. Work only on `.sisyphus` or the execution-artifact area explicitly named by the user.
-3. Run the full verified cleanup flow:
-   - inventory
-   - completion/state verification
-   - durable-knowledge deduplication
-   - deletion of verified temporary artifacts
-   - final proof of the remaining directory state or confirmed removal
-4. Preserve only durable guardrails, topology, reference, and contract knowledge. Do not mirror transient task logs into long-term memory.
-5. If cleanup exposes reusable knowledge that must be restructured, perform that restructuring as part of this command path instead of leaving an implicit follow-up.
-6. If cleanup changes long-term truth, sync the relevant reusable memory and README carriers before finishing.
-7. End with a concrete cleanup report: what was inventoried, what was deleted, what was preserved, and what durable knowledge carriers were updated.
+将 `.sisyphus` 清理视为**验证优先的执行产物清理**，而非盲目文件清除。核心规则：**盘点 → 验证状态 → 去重持久化知识 → 删除临时产物 → 证明清理结果**。
 
-Use the existing cleanup and memory-governance skills as reference material when helpful, but the command itself owns the operational flow and success criteria.
+## 加载条件
+
+以下任一条件为真时加载：
+
+- 用户要求清理、修剪、归档、重置或移除 `.sisyphus` 内容
+- 目录包含可能已过期的计划、便签、证据、状态文件或空文件夹
+- 用户希望仅保留有用的架构笔记，同时删除已完成的执行产物
+- 清理决策取决于条目是否已完成、活跃、已在记忆中重复或可安全删除
+
+## 强制规则
+
+1. 从完整盘点开始。禁止仅凭文件名分类。
+2. 在删除计划或便签前，先在代码/仓库现实中验证完成状态。
+3. 将 `boulder.json`、计划文件、证据、笔记视为**有状态载体**，直到证明可废弃。
+4. 仅在检查已有记忆确认无重叠后，才保留持久化架构知识。
+5. 禁止将任务日志镜像到记忆。仅保留持久化的 `guardrails`（防回归）、`reference`（参考）、`topology`（拓扑）、`contract`（契约）知识。
+6. 仅在唯一价值被证伪或已保存到其他位置后，才删除临时产物。
+7. 仅在确认真正为空后才移除空目录。
+8. 以证据结束：展示剩余目录状态或验证目录已不存在。
+
+## 分类检查
+
+**验证后**对每个条目分类：
+
+- **活跃状态** — 当前计划/会话状态、活跃检查点、使用中的产物 → 保留
+- **已完成临时产物** — 已结束的计划、证据输出、执行日志、过期追踪器 → 删除
+- **持久化知识** — 架构、防回归经验、拓扑、可复用规则 → 通过已有/更新记忆保留
+- **未知** — 无法证明状态 → 保留至验证完成
+
+## 执行顺序
+
+1. **盘点**：列出完整 `.sisyphus` 树；识别计划、便签、证据、状态文件、空目录
+
+2. **验证状态，而非推断**：确认工作在代码/仓库中确实已完成；检查 `boulder.json` 是否仍指向活跃工作；即使用户说「已完成」，仍需验证
+
+3. **删除前审查持久化知识**：先读取已有记忆；若持久化知识已存在，禁止重复；若笔记包含独特长期价值，压缩为聚焦的记忆更新；使用 `memory-restructuring` 原则：一条记忆 = 一个主要职责
+
+4. **仅删除已验证的临时产物**：仅在步骤 2-3 完成后删除已完成计划、过期便签、证据输出、可废弃状态文件；确认空后移除空目录；若 `.sisyphus` 变空，一并移除根目录
+
+5. **证明结果**：列出 `.sisyphus` 剩余内容，或验证 `.sisyphus` 已不存在；报告已删除项、已保留项、为何无持久化知识丢失
+
+## 删除检查清单
+
+仅在以下**全部**为真时才删除：
+
+- 状态已验证，非假定
+- 不是当前活跃执行状态的来源
+- 任何独特持久化知识已保留或证明确属冗余
+- 移除减少噪音而不产生第二事实来源
+- 清理后状态可立即验证
+
+不确定时，保留并标记待后续处理。
+
+## 记忆处理协议
+
+保留笔记衍生知识前的顺序：`list_memories` → `read_memory` 检查重叠 → 决定（保留已有/更新已有/新建/不操作）→ 执行 → 然后才删除来源
+
+**禁止存储**：会话 ID、一次性执行日志、临时审计笔记、验证输出文本、大量复制的计划历史
+
+## 报告结构
+
+完成时报告：删除前已验证 → 已删除 → 持久化知识已保留/有意不保留 → 最终证据（`剩余目录树` 或 `路径不存在`）
+
+**边界**：使用 `memory-restructuring` 处理跨多条记忆的存储级重组；使用 `sisyphus-cleanup` 处理 `.sisyphus` 执行产物清理。当清理发现持久化知识缺口时，使用 `memory-restructuring` 原则进行保留步骤。
