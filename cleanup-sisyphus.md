@@ -48,7 +48,7 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 2. **验证状态，而非推断**：确认工作在代码/仓库中确实已完成；检查 `boulder.json` 是否仍指向活跃工作；即使用户说「已完成」，仍需验证
 
-3. **删除前审查持久化知识**：先读取已有记忆；若持久化知识已存在，禁止重复；若笔记包含独特长期价值，压缩为聚焦的记忆更新；使用 `memory-restructuring` 原则：一条记忆 = 一个主要职责
+3. **删除前审查持久化知识**：先读取已有记忆；若持久化知识已存在，禁止重复；若笔记包含独特长期价值，压缩为聚焦的记忆更新；使用 `/restructure-memory` 原则：一条记忆 = 一个主要职责
 
 4. **仅删除已验证的临时产物**：仅在步骤 2-3 完成后删除已完成计划、过期便签、证据输出、可废弃状态文件；确认空后移除空目录；若 `.sisyphus` 变空，一并移除根目录
 
@@ -76,4 +76,4 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 完成时报告：删除前已验证 → 已删除 → 持久化知识已保留/有意不保留 → 最终证据（`剩余目录树` 或 `路径不存在`）
 
-**边界**：使用 `memory-restructuring` 处理跨多条记忆的存储级重组；使用 `sisyphus-cleanup` 处理 `.sisyphus` 执行产物清理。当清理发现持久化知识缺口时，使用 `memory-restructuring` 原则进行保留步骤。
+**边界**：使用 `/restructure-memory` 处理跨多条记忆的存储级重组；使用 `/cleanup-sisyphus` 处理 `.sisyphus` 执行产物清理。当清理发现持久化知识缺口时，使用 `/restructure-memory` 原则进行保留步骤。
