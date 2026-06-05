@@ -1,5 +1,5 @@
 ---
-description: Audit and clean the .sisyphus workspace while preserving durable knowledge.
+description: Audit and clean the .sisyphus / .omo workspace while preserving durable knowledge.
 subtask: true
 ---
 
@@ -7,17 +7,58 @@ You are executing the `/cleanup-sisyphus` command.
 
 Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra retention constraints.
 
-# Sisyphus 清理
+# Sisyphus / Omo 清理
 
 ## 概述
 
-将 `.sisyphus` 清理视为**验证优先的执行产物清理**，而非盲目文件清除。核心规则：**盘点 → 验证状态 → 去重持久化知识 → 删除临时产物 → 证明清理结果**。
+将 `.sisyphus` / `.omo` 清理视为**验证优先的执行产物清理**，而非盲目文件清除。核心规则：**探测目录 → 盘点 → 验证状态 → 去重持久化知识 → 删除临时产物 → 证明清理结果**。
+
+## 目录探测
+
+新版本 omo 已将工作目录从 `.sisyphus` 迁移到 `.omo`。清理时需要：
+
+1. **探测存在性**：检查项目中 `.omo` 和 `.sisyphus` 是否存在
+2. **确定目标目录**：
+   - 仅 `.omo` 存在 → 清理 `.omo`
+   - 仅 `.sisyphus` 存在 → 以 `.omo` 为迁移目标进行清理（见下方迁移协议）
+   - **两者都存在** → 先合并 `.sisyphus` 中的内容到 `.omo`，再清理两者（见下方迁移协议）
+   - 两者都不存在 → 报告无需清理，结束
+3. 后续所有步骤中，将「目标目录」简称为 `$WORKSPACE`
+
+## 迁移协议
+
+### 何时触发
+
+- `.sisyphus` 和 `.omo` 同时存在 → 必须触发
+- 仅 `.sisyphus` 存在，且盘点后发现**存在无法删除的活跃内容**（如未完成计划、活跃检查点） → 必须触发，将活跃内容迁移到 `.omo`
+
+### 迁移流程
+
+1. **盘点两者**：
+   - 仅 `.omo` 存在时 → 盘点 `.omo`
+   - 仅 `.sisyphus` 存在时 → 盘点 `.sisyphus`，识别活跃与可删除条目
+   - 两者共存时 → 分别列出完整目录树，交叉对比
+
+2. **分类 `.sisyphus` 内容**：
+   - **可安全删除的临时产物**（已完成计划、过期证据等） → 直接删除
+   - **活跃/无法确认状态的内容**（未完成计划、活跃检查点、`boulder.json` 中仍指向的工作） → **迁移到 `.omo` 对应位置**
+   - **持久化知识** → 按记忆处理协议处理，不迁移文件
+
+3. **合并策略**（两者共存时）：
+   - `.omo` 中已有的内容 → 以 `.omo` 版本为准，忽略 `.sisyphus` 中的同名文件
+   - `.sisyphus` 独有的有价值内容 → 迁移到 `.omo` 对应位置
+   - `.sisyphus` 独有的临时/过期内容 → 直接删除
+
+4. **完成迁移后**：
+   - 对 `.omo` 按正常流程执行清理
+   - 删除 `.sisyphus` 中所有已迁移或已清理的内容
+   - 若 `.sisyphus` 变空，移除 `.sisyphus` 根目录
 
 ## 加载条件
 
 以下任一条件为真时加载：
 
-- 用户要求清理、修剪、归档、重置或移除 `.sisyphus` 内容
+- 用户要求清理、修剪、归档、重置或移除 `.sisyphus` 或 `.omo` 内容
 - 目录包含可能已过期的计划、便签、证据、状态文件或空文件夹
 - 用户希望仅保留有用的架构笔记，同时删除已完成的执行产物
 - 清理决策取决于条目是否已完成、活跃、已在记忆中重复或可安全删除
@@ -44,15 +85,17 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 ## 执行顺序
 
-1. **盘点**：列出完整 `.sisyphus` 树；识别计划、便签、证据、状态文件、空目录
+1. **探测目录**：按上方「目录探测」流程确定 `$WORKSPACE`（`.omo` 或 `.sisyphus`）；若两者共存，或仅 `.sisyphus` 存在且有活跃内容无法删除，则执行「迁移协议」
 
-2. **验证状态，而非推断**：确认工作在代码/仓库中确实已完成；检查 `boulder.json` 是否仍指向活跃工作；即使用户说「已完成」，仍需验证
+2. **盘点**：列出完整 `$WORKSPACE` 树；识别计划、便签、证据、状态文件、空目录
 
-3. **删除前审查持久化知识**：先读取已有记忆；若持久化知识已存在，禁止重复；若笔记包含独特长期价值，压缩为聚焦的记忆更新；使用 `/restructure-memory` 原则：一条记忆 = 一个主要职责
+3. **验证状态，而非推断**：确认工作在代码/仓库中确实已完成；检查 `boulder.json`（或等效状态文件）是否仍指向活跃工作；即使用户说「已完成」，仍需验证
 
-4. **仅删除已验证的临时产物**：仅在步骤 2-3 完成后删除已完成计划、过期便签、证据输出、可废弃状态文件；确认空后移除空目录；若 `.sisyphus` 变空，一并移除根目录
+4. **删除前审查持久化知识**：先读取已有记忆；若持久化知识已存在，禁止重复；若笔记包含独特长期价值，压缩为聚焦的记忆更新；使用 `/restructure-memory` 原则：一条记忆 = 一个主要职责
 
-5. **证明结果**：列出 `.sisyphus` 剩余内容，或验证 `.sisyphus` 已不存在；报告已删除项、已保留项、为何无持久化知识丢失
+5. **仅删除已验证的临时产物**：仅在步骤 3-4 完成后删除已完成计划、过期便签、证据输出、可废弃状态文件；确认空后移除空目录；若 `$WORKSPACE` 变空，一并移除根目录
+
+6. **证明结果**：列出 `$WORKSPACE` 剩余内容，或验证 `$WORKSPACE` 已不存在；报告已删除项、已保留项、为何无持久化知识丢失
 
 ## 删除检查清单
 
@@ -76,4 +119,4 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 完成时报告：删除前已验证 → 已删除 → 持久化知识已保留/有意不保留 → 最终证据（`剩余目录树` 或 `路径不存在`）
 
-**边界**：使用 `/restructure-memory` 处理跨多条记忆的存储级重组；使用 `/cleanup-sisyphus` 处理 `.sisyphus` 执行产物清理。当清理发现持久化知识缺口时，使用 `/restructure-memory` 原则进行保留步骤。
+**边界**：使用 `/restructure-memory` 处理跨多条记忆的存储级重组；使用 `/cleanup-sisyphus` 处理 `.sisyphus` / `.omo` 执行产物清理。当清理发现持久化知识缺口时，使用 `/restructure-memory` 原则进行保留步骤。
