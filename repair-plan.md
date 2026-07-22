@@ -24,7 +24,7 @@ Treat `$ARGUMENTS` as the target plan path, plan identifier, or the user's focus
 2. **确定性修复流程**：在下游编辑前强制使用单一 task-ID 方案和单一契约常量集。运行确定性两轮流程（先规范化，再硬关卡重评估）。保持输出可审计，带显式关卡码和固定章节。
 3. **风险分层验证**：共享接口、跨模块集成、迁移、安全或高风险输出必须使用独立 `Task N-V`；无下游消费者的低风险本地任务可内联最小验证，避免为机械检查制造额外交接。
 4. **检查点与 Plan-Set 治理**：要求显式检查点和检查点级审计记录。对于 `plan-set`，每个子计划必须包含预检验证阶段，在当前阶段实现前重新验证上游输出。
-5. **分解与路由纪律**：任务粒度采用最小内聚可验证结果，而不是最小文件或最小动作。只有工作可独立验收、独立失败、需要不同专业能力或能安全并行时才拆分；共享同一接口决策、不变量或验证面的工作保持同一任务。修复后的计划必须与 `omo-gated-routing-rules` 对齐：在 author-time 已可确定路由的任务上写出合法的 `task(...)` 形状。每个任务必须以 `category` 或 `subagent_type` 二选一声明执行者，并同时给出 `load_skills`、`run_in_background`、`description` 与 `prompt`；`prompt` 必须包含 `[CONTEXT]`、`[GOAL]`、`[STOP WHEN]`、`[EVIDENCE]`、`[DOWNSTREAM]`、`[REQUEST]`。仅当 author-time 证据仍不足以确定执行者时，才允许使用 `executor_judgment`/`routing_by_executor` 并附一行理由。贵价 category（`deep`、`ultrabrain`、`visual-engineering`、`artistry`）仅保留给确实需要专业能力的工作，且必须包含 `[WHY_NOT_LOWER_COST]`；不得把贵价路由当成替代拆分的手段。
+5. **分解与路由纪律**：任务粒度采用最小内聚可验证结果，而不是最小文件或最小动作。只有工作可独立验收、独立失败、需要不同专业能力或能安全并行时才拆分；共享同一接口决策、不变量或验证面的工作保持同一任务。修复后的计划必须与 `omo-adaptive-execution/routing.md` 对齐：在 author-time 已可确定路由的任务上写出合法的 `task(...)` 形状。每个任务必须以 `category` 或 `subagent_type` 二选一声明执行者，并同时给出 `load_skills`、`run_in_background`、`description` 与 `prompt`；`prompt` 必须包含 `[CONTEXT]`、`[GOAL]`、`[STOP WHEN]`、`[EVIDENCE]`、`[DOWNSTREAM]`、`[REQUEST]`。仅当 author-time 证据仍不足以确定执行者时，才允许使用 `executor_judgment`/`routing_by_executor` 并附一行理由。贵价 category（`deep`、`ultrabrain`、`visual-engineering`、`artistry`）仅保留给确实需要专业能力的工作，且必须包含 `[WHY_NOT_LOWER_COST]`；不得把贵价路由当成替代拆分的手段。
 6. **用户侧防漂移锚点**：每个计划必须在顶部附近包含简洁的用户可读摘要。修复后的计划必须保留 `## User Requirement Digest` 和 `## Intent Anchor`，不得创建第二个任务事实来源。
 7. **执行命令格式**：当当前执行单位为 Prometheus/Atlas 时，输出的 `/start-work` 执行命令必须使用包含计划文件名（不含扩展名）的完整格式：`/start-work <filename>`。对于 `plan-set`，`<filename>` 为索引文件名（即原始计划文件名）；对于 `single-file`，`<filename>` 为该计划文件名。例如计划文件名为 `audit-p0-p1-fixes.md`，则执行命令为 `/start-work audit-p0-p1-fixes`。不得输出无文件名的裸 `/start-work`。
 8. **平台到本地的收敛**：上游平台 runtime 术语（如 `sisyphus-junior`）可以作为 imported plan 的事实输入，但若超出本地 authoring subset，必须先被规范化成本地可执行的路由表达，不能直接越过本地 schema 进入执行。
@@ -38,7 +38,7 @@ Treat `$ARGUMENTS` as the target plan path, plan identifier, or the user's focus
 
 ## 提示精简契约
 
-本 command 是显式稳定计划的修复/验证权威来源。Prometheus 将修复语义委托至此。共享的分解、路由和提级原则来自 `adaptive-execution` 与 `omo-gated-routing-rules`。若提示文本与本 command 发生漂移，本 command 在计划修复决策中优先。不要在 Prometheus 中复制冗长的硬关卡规则块；将修复专用关卡保留在此。
+本 command 是显式稳定计划的修复/验证权威来源。Prometheus 将修复语义委托至此。共享的分解、路由和提级原则来自 `omo-adaptive-execution`。若提示文本与本 command 发生漂移，本 command 在计划修复决策中优先。不要在 Prometheus 中复制冗长的硬关卡规则块；将修复专用关卡保留在此。
 
 ## 第二轮修复模式（强制）
 
@@ -176,5 +176,5 @@ Plan-Set 文件结构：子计划文件直接放在原始计划文件同一目�
 - 权威性结构修复的落地路径，用于权威性计划编辑。在执行前和审查驱动的缺陷发现后使用。
 - 定义结构有效、修复完成的计划应是什么样；不负责运行时执行顺序、证据纪律或提交时机。
 - Atlas 仅在动态执行连续两轮结构重排仍无法闭合、用户要求冻结计划，或需要长期计划资产时使用此规范。Prometheus 提供紧凑的路由意图；本 command 展开并执行具体修复关卡。
-- `metis` 可能暴露遗漏，`oracle` 可能产出修订简报；局部依赖变化由 `adaptive-execution` 在不改变用户目标的前提下重排，权威计划结构变更再通过本 command 落地。
+- `metis` 可能暴露遗漏，`oracle` 可能产出修订简报；局部依赖变化由 `omo-adaptive-execution` 在不改变用户目标的前提下重排，权威计划结构变更再通过本 command 落地。
 - 输出在当前审查消息中行内发出；不需要单独的产物文件。
