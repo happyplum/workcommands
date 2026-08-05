@@ -18,16 +18,237 @@ Treat `$ARGUMENTS` as the target plan path, plan identifier, or the user's focus
 
 **规范化入口：** 对 reviewed / imported plan 先判断它是否已经是本地治理认可的 execution-ready surface。若只是缺本地治理约束、仍可确定恢复，则进入 `normalize-before-execute`；若存在硬关卡失败或结构失真，再进入 `repair-before-execute`。
 
+## 上游契约自检（必先执行）
+
+**本 command 是二次质检器，不是契约来源。** 调用本 command 的 agent 必须在执行修复前**并行加载**下列 5 个上游 skill / prompt，按其**当前最新版本**做对齐检查，缺口进入关卡：
+
+| # | 上游契约 | 加载方式 | 对齐检查抽象 |
+|---|---|---|---|
+| 1 | `ulw-plan` skill | `skill(name="ulw-plan")` | Plan artifact producer contract（`- [ ] N.` 整数行、`- [ ] F<n>.` final-verifier 行、column-zero、必须在 `## Todos` 或 `## Final verification wave`）；9 章节 template |
+| 2 | `omo-atlas-execution-constraints` skill | `skill(name="omo-atlas-execution-constraints")` | Atlas 执行边界（环境就绪、worktree 身份字段、`mode: worktree` 语义、worker 四态裁决） |
+| 3 | `omo-adaptive-execution` skill | `skill(name="omo-adaptive-execution")` | `task()` 路由与委托契约（category XOR subagent_type、`[CONTEXT]/[GOAL]/[STOP WHEN]/[EVIDENCE]/[DOWNSTREAM]/[REQUEST]` 六段、worker 四态） |
+| 4 | `prompts/atlas.md` | 直接读源 | 环境就绪检查、顶层 `workspaces` 身份解析（`name/path/branch`）、`mode: worktree` 处理、身份字段缺失即停止 |
+| 5 | `prompts/prometheus.md` | 直接读源 | 顶层 `workspaces` 无条件存在、命名规范、`handoff`（路径/版本/状态/未决/入口） |
+
+**规则**：
+
+- 本 command **不复制**上游契约原文。仅以下列抽象层级的「上游对齐检查」（见「必需检查 / 上游对齐层」）做缺口识别，缺口 → 修复方向 → 关卡代码。
+- 加载失败（如某 skill/prompt 在当前环境不可用）→ 在修复报告中标注 `UPSTREAM_SOURCE_UNAVAILABLE` 并跳过该契约的对齐检查（**不**视为硬关卡失败）。
+- 上游契约间的冲突由上游裁决；本 command 只识别「是否符合上游要求」，不裁定上游契约谁优先。
+
+## 目标计划结构（强制对齐）
+
+本 command 修复后的计划**必须**符合以下扁平、Wave + Todos 驱动的结构（参考 `.omo/plans/apps-debt-governance.md`）。不再使用 `Task N` / `Task N-V` / `CP0-CP3` / `Plan Size Audit` / `User Requirement Digest` / `Intent Anchor` / `Execution Skill Requirements` 等旧重型 schema。
+
+修复后的计划文件**必须**按以下顺序包含这些顶层章节（缺失章节由修复流程注入骨架）。章节顺序与上游 ulw-plan 9 章节 template 对齐；本 command 在其基础上补强 `## Workspaces`（顶层身份）与 `## Handoff`：
+
+1. `# <plan-id> - Work Plan`
+2. `## TL;DR (For humans)` —— 必须含子区块：`**做什么**` / `**为什么这个方法**` / `**不会做什么**` / `**投入**` / `**风险**` / `**关键决策**`
+3. `## Scope` —— 必须含三个子区块：`### Scope IN` / `### Scope OUT` / `### Deferred（BLOCKED on decision）`
+4. `## Verification strategy` —— 必须为层级/方法/命令三列表格；高危专项可作为加粗小节附在表后
+5. `## Workspaces`（顶层身份）—— 每个 lane 一个条目，提供 `name` / `path` / `branch` 三项身份字段。**单 lane 计划也必须给全身份**（不省略此章节、不简化为 `single-lane` 字符串），否则 Atlas 环境就绪检查无解析入口 → `WORKSPACE_IDENTITY_MISSING`
+6. `## Execution strategy` —— 必须含三个子区块：
+   - `### Workspaces`（编排视图）—— Lane/Worktree/Path/Branch 四列表；与顶层 `## Workspaces` 的身份字段一一对应；仅作为人类可读视图，不替代顶层身份
+   - `### Dependency matrix` —— code block 描述任务依赖与并行结构
+   - `### Routing` —— Task/Category 或 subagent_type /load_skills/WHY 四列表（见「Routing 枚举」）
+7. `## Todos` —— Markdown 复选框列表，每个任务节点为列表项；行格式必须为 `- [ ] N. <title>`（N 为正十进制整数，不允许小数后缀）
+8. `## Final verification wave` —— 至少 `F1 计划合规审计` / `F2 代码质量审查` / `F3 全量 QA` / `F4 范围保真检查`；行格式必须为 `- [ ] F<number>. <title>`
+9. `## Commit strategy`
+10. `## Success criteria` —— 编号列表，每条可独立验证
+11. `## Handoff` —— 必须含五个子区块：`**计划路径**` / `**版本**` / `**当前状态**` / `**未决事项**` / `**执行入口**`（执行入口为 `/start-work <plan-name>` 含可选 options `--worktree` / `--make-pr` / `--ship`）
+
+### Todos 节点字段契约（每个任务节点必填）
+
+每个 Todo 必须以加粗引用块或子列表形式提供以下字段（缺一触发 `TODO_FIELD_MISSING`）：
+
+- **References** —— 涉及的精确文件路径与行号/区块（不可只有模糊描述）
+- **Scope** —— 该任务做什么、不做什么（一句话边界）
+- **Acceptance** —— 可观测的完成条件（命令、grep 结果、exit code 等）
+- **Evidence** —— 该任务完成后产出的证据落点（产物路径 / diff 路径 / 测试输出路径 / 日志路径）；与 QA happy/QA failure 产出对齐；缺证据路径 → `EVIDENCE_PATH_MISSING`
+- **QA happy** —— 成功路径的最小验证（含具体工具调用与预期结果）
+- **QA failure** —— 失败路径的处理方式（不得静默继续；含具体工具调用与判定阈值）
+- **Commit** —— 原子提交的中文动词短语（不含 task 编号/emoji/Co-Authored-By）
+- **workspace_lane** —— 所属 lane 名（如 `main` / `gateway` / `runtime`）；single-lane 计划也必须显式写 `main`
+- **category** 或 **subagent_type** —— 二选一（见「Routing 枚举」）。`category` 用于实现类任务；`subagent_type` 用于显式调用 explore/librarian/metis/oracle/momus 等只读专家
+- **load_skills** —— 任务执行时预加载的 skill 名列表，可为 `[]`
+
+可选字段（建议但非硬关卡）：
+- **Pre-condition** —— 任务开始前必须成立的前置；若 BLOCKING 必须显式标注 `Pre-condition（BLOCKING）`
+- **parallel-safe** / **serial-only** —— 多任务协作时声明并行性，`serial-only` 必须附一行约束理由
+
+**并行裁决规则**（当 Wave / Dependency matrix 与本字段冲突时）：
+
+1. `serial-only` 否决 Wave 并行（强规则，无例外）
+2. 同一 lane 内两个 Todo 的 References 写集（文件路径集合）存在重叠 → 默认串行，无论是否声明 parallel-safe
+3. 拆解产生的并行子任务的 References 必须显式互斥；不满足互斥的"并行"声明触发软警告 `PARALLEL_WRITESET_OVERLAP`
+
 ## 强制规则
 
 1. **修复边界**：不得重新界定产品意图。仅修复结构、依赖真实性和验证真实性。未解决的硬关卡 → `REJECT`。高影响歧义 → 先问 1-3 个定向问题；若仍不确定 → `BLOCKED_NEEDS_DECISION`；不得猜测。
-2. **确定性修复流程**：在下游编辑前强制使用单一 task-ID 方案和单一契约常量集。运行确定性两轮流程（先规范化，再硬关卡重评估）。保持输出可审计，带显式关卡码和固定章节。
-3. **风险分层验证**：共享接口、跨模块集成、迁移、安全或高风险输出必须使用独立 `Task N-V`；无下游消费者的低风险本地任务可内联最小验证，避免为机械检查制造额外交接。
-4. **检查点与 Plan-Set 治理**：要求显式检查点和检查点级审计记录。对于 `plan-set`，每个子计划必须包含预检验证阶段，在当前阶段实现前重新验证上游输出。
-5. **分解与路由纪律**：任务粒度采用最小内聚可验证结果，而不是最小文件或最小动作。只有工作可独立验收、独立失败、需要不同专业能力或能安全并行时才拆分；共享同一接口决策、不变量或验证面的工作保持同一任务。修复后的计划必须与 `omo-adaptive-execution/SKILL.md` 路由章节对齐：在 author-time 已可确定路由的任务上写出合法的 `task(...)` 形状。每个任务必须以 `category` 或 `subagent_type` 二选一声明执行者，并同时给出 `load_skills`、`run_in_background`、`description` 与 `prompt`；`prompt` 必须包含 `[CONTEXT]`、`[GOAL]`、`[STOP WHEN]`、`[EVIDENCE]`、`[DOWNSTREAM]`、`[REQUEST]`。仅当 author-time 证据仍不足以确定执行者时，才允许使用 `executor_judgment`/`routing_by_executor` 并附一行理由。贵价 category（`deep`、`ultrabrain`、`visual-engineering`、`artistry`）仅保留给确实需要专业能力的工作，且必须包含 `[WHY_NOT_LOWER_COST]`；不得把贵价路由当成替代拆分的手段。
-6. **用户侧防漂移锚点**：每个计划必须在顶部附近包含简洁的用户可读摘要。修复后的计划必须保留 `## User Requirement Digest` 和 `## Intent Anchor`，不得创建第二个任务事实来源。
-7. **执行命令格式**：当当前执行单位为 Prometheus/Atlas 时，输出的 `/start-work` 执行命令必须使用包含计划文件名（不含扩展名）的完整格式：`/start-work <filename>`。对于 `plan-set`，`<filename>` 为索引文件名（即原始计划文件名）；对于 `single-file`，`<filename>` 为该计划文件名。例如计划文件名为 `audit-p0-p1-fixes.md`，则执行命令为 `/start-work audit-p0-p1-fixes`。不得输出无文件名的裸 `/start-work`。
-8. **平台到本地的收敛**：上游平台 runtime 术语（如 `sisyphus-junior`）可以作为 imported plan 的事实输入，但若超出本地 authoring subset，必须先被规范化成本地可执行的路由表达，不能直接越过本地 schema 进入执行。
+2. **确定性修复流程**：运行确定性两轮流程（先规范化，再硬关卡重评估）。保持输出可审计，带显式关卡码和固定章节。
+3. **风险分层验证**：共享接口、跨模块集成、迁移、安全或高风险输出必须在 Acceptance + QA happy + QA failure 中显式覆盖；低风险本地任务可保持最简 QA。
+4. **分解与路由纪律**：任务粒度采用最小内聚可验证结果。共享同一接口决策、不变量或验证面的工作保持同一任务。修复后的 Routing 表必须使用合法枚举值（见「Routing 枚举」）。贵价 category（`deep`、`ultrabrain`、`visual-engineering`、`artistry`）仅保留给确实需要专业能力的工作；保留时必须在该任务的 `WHY` 字段或 Routing 表 WHY 列写一行理由。
+5. **用户侧防漂移锚点**：每个计划必须保留 `## TL;DR (For humans)` 章节作为单一用户事实来源；不得另建摘要副本。
+6. **执行命令格式**：当当前执行单位为 Prometheus/Atlas 时，输出的 `/start-work` 执行命令必须使用包含计划文件名（不含扩展名）的完整格式：`/start-work <filename>`。例如计划文件名为 `audit-p0-p1-fixes.md`，则执行命令为 `/start-work audit-p0-p1-fixes`。不得输出无文件名的裸 `/start-work`。
+7. **平台到本地的收敛**：上游平台 runtime 术语（如 `sisyphus-junior`）可以作为 imported plan 的事实输入，但必须先被规范化成本地可执行的路由表达（Routing 表 + category 枚举），不能直接越过本地 schema 进入执行。
+
+## Routing 枚举
+
+Routing 表的 Task 行必须用 `category` **或** `subagent_type` 二选一声明执行者（与 `omo-adaptive-execution` 的 `task()` schema 一致）：
+
+- **`category` 允许值**（实现类任务）：`visual-engineering` / `ultrabrain` / `deep` / `artistry` / `quick` / `unspecified-low` / `unspecified-high` / `writing`
+- **`subagent_type` 允许值**（只读专家）：`explore` / `librarian` / `metis` / `oracle` / `momus`
+- **兜底**：当任务执行需要由 executor 现场决定路由（例如 PLAN 标注 `executor_judgment` 或 `routing_by_executor`），Routing 表可在 WHY 列显式声明并留空 category/subagent_type 列；该兜底不得滥用，每个使用必须给出理由
+
+`load_skills` 仅允许使用项目有效 skill 名（见 skills 索引）或 `[]`。
+
+每个任务节点必须以 `category` 或 `subagent_type` 声明执行者（或显式兜底）。`load_skills` 默认 `[omo-adaptive-execution]`；做产品代码语义工作的任务应追加 `serena-first-codework`。
+
+Routing 表若无法表达 `subagent_type` 或兜底语义 → 触发软警告 `ROUTING_DISPATCHER_UNSUPPORTED`（不阻断，提示按 omo-adaptive-execution 最新规范对齐）。
+
+## 高成本任务拆解分析（必执行章节）
+
+### 触发对象
+
+对每个 `category ∈ {deep, unspecified-high, ultrabrain}` 的**可执行叶节点** Todo，必须执行拆解分析。**不是凡贵必拆**——分析后输出明确结论：可拆 / 不可拆。
+
+**拆解终止规则**（防递归）：
+
+1. **只分析可执行叶节点** —— 已被拆解为父节点的 Todo 不再触发分析（父节点通过 References 字段的 `decomposed_into: [...]` 标记为非执行，见「拆解输出」）
+2. **单次修复最多拆一层** —— 子任务即使仍是高成本 category，也不再进入第二轮拆解分析
+3. **残留高成本叶节点的强制结论** —— 若拆解后某子任务仍是 `deep` / `unspecified-high` / `ultrabrain`，必须在该子任务末尾追加 `[WHY_NOT_SPLIT]` 理由（如「再拆会破坏契约内聚」），不得留作隐式高成本
+
+### 分析维度（逐项核对并记录结论）
+
+对每个高成本任务，沿以下维度判断是否存在 ≥2 个**可独立验收、可独立失败、可并行**的子结果：
+
+| 维度 | 倾向可拆 | 倾向不拆 |
+|---|---|---|
+| References 跨文件数 | ≥2 文件 / 跨包 | 单文件局部 |
+| 估算改动行数 | ≥150 行 | <150 行 |
+| Pre-condition | 含 BLOCKING 前置 / characterization test | 无前置 |
+| 子结果独立性 | 多个独立可验收产出 | 共享同一不变量/接口决策 |
+| 并行收益 | 子结果可并行执行显著缩短关键路径 | 强顺序依赖，拆开只增交接 |
+| 风险隔离需求 | 子结果各自需要独立 QA failure 路径 | 同一验证面统一处理 |
+
+### 拆解输出
+
+**可拆** → 在原 Todo 节点下注入子任务列表（保留原 task 编号作为父，子任务用父编号 + 小数后缀，如 `10.1` / `10.2`）：
+
+- 每个子任务**完整复用 Todos 节点字段契约**（References / Scope / Acceptance / QA happy / QA failure / Commit / workspace_lane / category / load_skills）
+- 子任务的 `category` 通常**降级**（`deep` → `unspecified-high` 或 `quick`；`ultrabrain` → `deep` 或 `unspecified-high`），并附降级理由
+- 子任务**继承父任务的 Wave 与 workspace_lane**（不新建 sub-Wave）；中间校验点表现为 Wave 内的阻塞依赖边
+- 子任务之间的并行/串行关系写入 `### Dependency matrix`
+- 子任务的 References 写集若声明可并行则必须**互斥**（同一文件路径不可被多个并行子任务写入）
+- **父任务转为非执行编排节点**：
+  - References 字段改为 `decomposed_into: [<子任务编号列表>]`
+  - **不进入** `### Routing` 表（Routing 只列可执行叶节点，与 Todos 的可执行节点一一对应）
+  - Scope 改为「编排子任务」
+  - 父任务不触发任何 `task()` 调用
+
+**不可拆** → 在该 Todo 节点的 Routing 表 WHY 列或任务体末尾追加一行：
+
+```
+- **[WHY_NOT_SPLIT]**: <一行理由，如「单文件单接口决策，拆开增加交接不增加并行收益」>
+```
+
+### 拆解后中间校验点（强制）
+
+凡被拆解为 ≥2 个子任务的高成本任务，必须在子任务序列中注入**中间校验点**。校验点本身是子任务（带完整字段契约），位于关键子任务之间，承担三类职责之一：
+
+1. **基线锁定** —— 在改动前用 characterization test / git diff / wire 捕获锁定现有行为（如 KB 适配器迁移前的 status 映射锁定）
+2. **契约对齐** —— 在两个子任务共享接口边界时验证双方契约一致（如 canonical port 补齐后再切消费者）
+3. **diff 闭合** —— 在并行子任务汇合前验证无漂移（如 gateway + runtime lane 合并回 main lane 前的 parity test）
+
+中间校验点的 `category` 通常为 `quick` 或 `unspecified-low`；`Acceptance` 必须是可运行的命令或可观测的检查；`QA failure` 必须 BLOCKING（拦截下游子任务继续）。
+
+如果分析后认为该任务无需中间校验点（极少见），必须显式写 `- **[NO_MIDPOINT_JUSTIFIED]**: <理由>`，否则触发 `MIDPOINT_MISSING`。
+
+## Worktree 环境校验阶段（强制 Wave 0 / Task 0）
+
+### 触发条件
+
+满足以下任一条件时，修复流程**必须**确保计划含一个 Wave 0 / Task 0「环境就绪」节点：
+
+- 计划含多 lane 条目（在顶层 `## Workspaces` 或 `### Workspaces` 表中）
+- 任何 Todo 节点的 `workspace_lane` 字段不为 `main`
+- Workspaces 中显式列出 ≥2 个 worktree 路径
+
+`single-lane` 计划（仅 main lane、无多 lane 条目）不触发本阶段；但**顶层 `## Workspaces` 章节仍必须存在**并给出 main lane 的身份字段（见硬关卡 `WORKSPACE_IDENTITY_MISSING`）。
+
+### Wave 0 / Task 0 字段契约
+
+注入的 Task 0 必须满足 Todos 节点字段契约，并额外覆盖：
+
+- **Scope**：校验或创建所有 Workspaces 表声明的 worktree；不覆盖已占用路径；记录所有 lane 的共同 base SHA
+- **References**：本计划 `## Execution strategy > Workspaces` 表
+- **package_manager**（额外字段，本任务专用）：显式声明项目包管理器与 install 命令。允许值：`pnpm: pnpm install --frozen-lockfile` / `npm: npm ci` / `yarn: yarn install --frozen-lockfile` / `cargo: cargo fetch --locked` / `go: go mod download` / `maven: mvn -o dependency:resolve` / `<other>: <command>`。未声明 → 触发软警告 `PKG_MANAGER_UNDECLARED`
+- **Acceptance**：
+  - `git worktree list` 显示 Workspaces 表中的每个路径
+  - 每个 worktree 内 `git rev-parse --abbrev-ref HEAD` 返回 Workspaces 表对应 Branch 列
+  - 每个 worktree 内运行 Task 0 声明的 install 命令并 exit 0
+  - 多 lane 计划中每个 lane 的 base SHA 一致
+- **QA happy**：上述检查全部通过
+- **QA failure**：
+  - worktree 路径已存在但 head 或 base 不匹配预期 → `BLOCKED_NEEDS_DECISION`，不强制切换
+  - worktree 路径不存在 → 走「分支创建协议」
+  - 路径被无关内容占用 → 报错并停止，不覆盖
+  - 多 lane base SHA 不一致 → 硬关卡 `BASE_SHA_DIVERGENT`
+- **Commit**：无（基础设施）
+- **workspace_lane**：`main`（此任务负责创建/校验所有 lane）
+- **category**：`quick`
+- **load_skills**：`[omo-adaptive-execution]`
+
+### 分支创建协议
+
+当 worktree 缺失时，按以下顺序操作，**不得跳步**：
+
+1. **声明解析**：从 Workspaces 表读取 `trunk=<branch>`（默认 `main`）与 `remote=<name>`（默认 `origin`）。未声明则用默认值并写入 Task 0 证据区
+2. **plan-id 安全化**：将 `<plan-id>` 转 lowercase；非 `[a-z0-9-]` 字符替换为 `-`；连续 `-` 合并为单个；长度截断至 50 字符。结果用于 `work/<plan-id>/<lane>` 分支名
+3. **主干状态校验**（在主仓执行）：
+   - `git status --porcelain` 非空 → 软警告 `TRUNK_DIRTY`，让用户决定是否继续
+   - `git rev-parse HEAD` ≠ `git rev-parse @{u}` → 软警告 `TRUNK_UNPUSHED`，让用户决定
+4. **拉取远端引用**：`git fetch <remote>`；失败 → `BLOCKED_NEEDS_DECISION`
+5. **解析并锁定 base SHA**：`git rev-parse <remote>/<trunk>` 写入 Task 0 证据区，作为本计划所有 lane 的共同 base SHA
+6. **幂等复用**：`git worktree list` 已含目标路径 → 校验其 head 指向 `work/<plan-id>/<lane>` 且 base SHA 一致 → 通过；不匹配 → `BLOCKED_NEEDS_DECISION`，不强制覆盖
+7. **创建分支与 worktree**：
+   - `git branch work/<plan-id>/<lane> <remote>/<trunk>`
+   - `git worktree add <path> work/<plan-id>/<lane>`
+8. **依赖安装**：在新 worktree 内运行 Task 0 声明的 install 命令；exit ≠ 0 → `BLOCKED_NEEDS_DECISION`
+9. **证据落盘**：将每个 lane 的（分支名、worktree 路径、base SHA、HEAD commit、install 命令、install exit code）写入 Task 0 Acceptance 证据区
+
+任何步骤失败 → `BLOCKED_NEEDS_DECISION` 并停止后续任务；不得猜测错误恢复路径。
+
+### 跨 lane 集成 Todo（强制注入）
+
+**触发条件**（同时满足）：
+
+- Workspaces 表含 ≥2 个非 main lane
+- main lane 的某个 Todo 在 `### Dependency matrix` 中依赖其他 lane 任务
+
+**注入规则**：在首个「消费其他 lane 产物」的 main lane Todo **之前**注入一个 lane-merge Todo，字段如下：
+
+- **References**：本计划 Workspaces 表 + 各非 main lane 的最终 HEAD commit
+- **Scope**：将所有非 main lane 的产出 merge 或 cherry-pick 到 main；不在本 Todo 实现业务逻辑
+- **Pre-condition（BLOCKING）**：上游 lane 的所有 Todo 已完成且各自 Acceptance 通过；解除形式为各上游 lane Todo 输出的 commit SHA
+- **Acceptance**：`git log <main>` 显示来自每个非 main lane 分支的 merge commit；main lane 运行 `## Verification strategy` 表中声明的总门禁命令（如 `pnpm run verify` / `cargo test` / `go test ./...`）通过
+- **QA happy**：merge 无冲突；总门禁 exit 0
+- **QA failure**：merge 冲突或门禁失败 → BLOCKING；触发 `BLOCKED_NEEDS_DECISION`，不自动 resolve
+- **Commit**：合并上游 lane 到主干
+- **workspace_lane**：`main`
+- **category**：`quick`
+- **load_skills**：`[omo-adaptive-execution]`
+
+### F2.5 Lane merge parity（最终复核）
+
+`F2.5` **不替代**上述「跨 lane 集成 Todo」，只做最终复核：
+
+- 每个 non-main lane 的提交已在 main lane 上可见
+- main lane 通过项目总门禁
+- 各 lane 分支相对 base SHA 无意外丢失
+- 多 lane 计划中各 lane base SHA 一致
+
+`F2.5` **阻塞** `F2` 与 `F3`：F2.5 未通过则 F2/F3 不得开始。
 
 ## 故障处理
 
@@ -42,97 +263,74 @@ Treat `$ARGUMENTS` as the target plan path, plan identifier, or the user's focus
 
 ## 第二轮修复模式（强制）
 
-1. **第一轮——结构规范化**：规范化执行 skill 头部、任务 ID 和依赖图、展平嵌套可执行项、规范化验证建模（`Task N`/`Task N-V`）。
+1. **第一轮——结构规范化**：
+   - 识别/补齐目标计划结构（TL;DR / Scope / Verification strategy / Execution strategy / Todos / Final verification wave / Commit strategy / Success criteria）
+   - 展平任何嵌套可执行项到 Todos 列表
+   - 识别 Workspaces 表 → 注入或补齐 Wave 0 / Task 0
+   - 识别高成本任务 → 执行拆解分析 → 注入子任务 + 中间校验点
+   - 规范化 Routing 表（category 枚举、load_skills 名）
+   - 统一 Dependency matrix 引用的 task ID
+
 2. **第二轮——关卡重评估**：在规范化后的计划上重跑所有硬关卡；失败时输出带关卡码的 `REJECT`；仅当硬关卡失败数 = 0 时输出 `PASS`。
 
 任何结构变更后不得跳过第二轮。
 
-## 检查点审计模型（强制）
-
-- `CP0——输入基线`：在规范化前确认输入契约完整性和检查点映射。
-- `CP1——规范化后`：重新编译任务图和依赖闭包。
-- `CP2——验证闭合`：确认 `Task N`/`Task N-V` 链接、QA 可执行性、验证范围隔离。
-- `CP3——发布就绪`：最终硬关卡摘要和分解/阶段交接就绪度。
-
-检查点审计循环：
-
-1. 运行 CP0 → 修复确定性问题。
-2. 运行 CP1 并重评估硬关卡。
-3. 若任何硬关卡失败，修复确定性问题并返回 CP1。
-4. CP1 通过后运行 CP2。
-5. 若 CP2 失败，修复并返回 CP1。
-6. 仅在 CP1 和 CP2 通过后运行 CP3。
-7. 仅当 CP3 通过且硬关卡失败数为零时退出；否则输出 `REJECT`。
-
-## 输入契约（强制）
-
-1. **单一 task-ID 方案**——Waves、TODO、依赖矩阵、最终验证中仅使用一种方案。同一计划中不得混用点分 ID 和顺序别名。
-2. **规范契约常量**在顶部附近声明一次：`interface_prefix`（API 类计划可为 `api_prefix`）、`versioning_scheme`、`evidence_root`、`primary_stack`。
-3. **用户摘要**：顶部附近的 `## User-Facing Summary`，使用用户自然语言编写，包含 `Development Core` 和 `User Requirements` 作为简洁散文/列表——不是任务 ID 或路由术语。
-4. **防漂移顶部章节**：`## User Requirement Digest`（保留用户的自然语言需求、约束、禁止项、当前焦点）和 `## Intent Anchor`（`Why`/`What`/`Non-Goals`/`Must Not Drift`）。若无法恢复 → 先问定向问题；仅在歧义仍存时使用 `BLOCKED_NEEDS_DECISION`。
-5. **执行 skill 头部**：`## Execution Skill Requirements`——主计划和每个子计划文件（当 `decomposition_decision = plan-set` 时）必需。
-6. **每任务的验证模式**：`inline` 或 `Task N-V`。共享接口（契约、基础设施、API 聚合、集成边界）必须使用 `Task N-V`。
-7. **路由声明**：对 author-time 已可确定路由的任务，必须直接写出合法的 `task(...)` 形状：`category` 或 `subagent_type`（二选一，不得并存）、`load_skills`、`run_in_background`、`description`、`prompt`。`category`/`subagent_type` 使用本地 authoring subset 的有效枚举值；`load_skills` 仅允许使用有效 skill 名称或 `[]`。`prompt` 必须包含 `[CONTEXT]`、`[GOAL]`、`[STOP WHEN]`、`[EVIDENCE]`、`[DOWNSTREAM]`、`[REQUEST]`；贵价任务还必须包含 `[WHY_NOT_LOWER_COST]`。仅当 author-time 仍不足以确定执行者时，才允许 `executor_judgment`/`routing_by_executor` + 一行理由。
-8. **计划规模审计块**：`estimated_waves`、`integration_boundaries`、`size_class`（`Small`/`Medium`/`Large`/`XLarge`）、`decomposition_decision`（`single-file` 或 `plan-set`）。
-9. **检查点映射**：`CP0`、`CP1`、`CP2`、`CP3`。
-10. **Plan-Set 索引追踪**（当 `decomposition_decision = plan-set` 时）：
-    - 索引文件为每个 Wave 和每个 Phase 暴露 Markdown 复选框。
-    - 索引仅是摘要视图；详细任务复选框状态保存在阶段文件中。
-    - Wave 复选框：仅当所有实现任务 + 配对的 `Task N-V` 节点完成时勾选。
-    - Phase 复选框：仅当所有可执行任务 + 配对验证节点完成时勾选。
-11. **子计划预检验证**（当 `decomposition_decision = plan-set` 时）：
-    - 每个阶段文件必须在实现任务前包含预检验证阶段。
-    - 阶段验证上游输出、未解决阻塞项和接口/契约兼容性。
-
-计划规模规则（最高匹配级别优先）：`Small`（waves ≤2，boundaries ≤1）| `Medium`（waves=3 或 boundaries=2）| `Large`（waves 4-5 或 boundaries=3）| `XLarge`（waves>5 或 boundaries≥4）。
-
-分解策略：`Small` 可使用 `single-file` 或 `plan-set`。`Medium`/`Large`/`XLarge` 必须使用 `plan-set`；`single-file` 无效。
-
-Plan-Set 文件结构：子计划文件直接放在原始计划文件同一目录中。不得创建新子文件夹。原始计划文件就地转换为索引文件，保留原始文件名。阶段文件使用阶段后缀命名（如 `my-feature-plan-phase-1.md`）。
-
-索引文件格式：`- [ ] Wave N: name` 和 `- [ ] Phase N: name`，带指向阶段文件的链接。完成后立即更新 Phase/Wave 复选框。若任何底层任务或验证节点重新开启，则重置为未勾选。
-
-若任何必需输入缺失，仅自动修复确定性结构/格式项。对于高影响的缺失业务决策，先问定向澄清问题；若歧义仍存，输出 `BLOCKED_NEEDS_DECISION` 并停止。
-
 ## 必需检查
 
-1. **执行 Skill 头部**——确保 `## Execution Skill Requirements` 存在。将 skill 分类为 `Always preload`、`Conditionally load`、`Task-local only`。声明条件 skill 的执行模式和选择理由。
-2. **任务形状完整性**——对 author-time 已可确定路由的任务，检查是否直接写出合法 `task(...)` 形状：`category` 或 `subagent_type`（二选一，不得并存）、`load_skills`、`run_in_background`、`description`、`prompt`。`prompt` 必须包含 `[CONTEXT]`、`[GOAL]`、`[STOP WHEN]`、`[EVIDENCE]`、`[DOWNSTREAM]`、`[REQUEST]`；贵价任务必须包含 `[WHY_NOT_LOWER_COST]`。只有在 author-time 证据仍不足以确定执行者时，才允许使用 `executor_judgment`/`routing_by_executor` + 一行理由延迟。关卡：`TASK_SHAPE_INCOMPLETE`（缺字段、XOR 违规、使用泛化路由意图、或贵价任务缺少 `[WHY_NOT_LOWER_COST]` 时硬失败）。
-3. **用户摘要**——顶部附近的 `## User-Facing Summary`，包含 `Development Core` 和 `User Requirements`，使用简洁的用户可读语言。关卡：`USER_SUMMARY_MISSING`（缺失、缺少任一字段、或仅为执行者简写时失败）。修复：从用户请求 + 已确定范围合成；若不可恢复 → 先问问题，再 `BLOCKED_NEEDS_DECISION`。
-4. **防漂移顶部章节**——顶部附近的 `## User Requirement Digest` + `## Intent Anchor`。Digest 保留用户自然语言需求/约束/禁止项；Anchor 捕获 `Why`/`What`/`Non-Goals`/`Must Not Drift`。关卡：`ANTI_DRIFT_TOP_SECTION_MISSING`（任一缺失、Digest 被重写为术语、或 Anchor 字段缺失时失败）。修复：在 Digest 中保留用户自然语言，从显式上下文提炼 Anchor；若不可恢复 → 先问问题，再 `BLOCKED_NEEDS_DECISION`。
-5. **任务展平**——将可执行的嵌套列表/清单提升为 `Task N`/`Task N.a`/`Task N-V`。仅当注释、文件列表和说明性列表项不可执行时保留嵌套。关卡：`NESTED_EXECUTABLES_FOUND`（规范化后仍保留可执行嵌套项时失败）。
-6. **标识符完整性**——Waves、任务列表、依赖矩阵和验证引用相同的 task ID。移除幻影依赖和缺失引用。关卡：`ID_GRAPH_MISMATCH`（重复 ID、未知 ID、幻影依赖、引用不存在的节点或混用 ID 别名时失败）。
-7. **验证配对**——共享接口、跨模块集成、迁移、安全、高风险输出或有下游消费者的实现任务需要配对的 `Task N-V` 独立节点；无下游消费者的低风险本地任务可内联最小验证。下游依赖在 `Task N-V` 存在时必须依赖 `Task N-V`。关卡：`VERIFY_CLOSURE_MISSING`（需要独立验证但缺少节点，或下游绕过既有 `Task N-V` 时失败）。
-8. **契约一致性**——路由前缀、命名、存储路径、功能范围在任务体、QA 和最终验证间匹配。最终验证不得声明没有实现任务的功能。关卡：`CONTRACT_DRIFT`。
-9. **任务图编译**——将 Waves + TODO + 依赖矩阵 + 验证引用编译为一个图。拒绝重复 ID、未知 ID、幻影依赖、不可达的必需节点和混用 ID 别名。
-10. **QA 可执行性**——每个 QA 块必须包含：`Tool`、`Preconditions`、`Commands/Inputs`、`Expected Observable`、`Evidence`。关卡：`QA_NOT_EXECUTABLE`（QA 缺少具体命令 + 可观测预期 + 证据目标时失败；拒绝纯叙述步骤。`Tool: Bash` 要求可运行命令行，不是模糊叙述）。
-11. **验证闭合**——共享接口、高风险输出和有下游消费者的任务必须使用 `Task N-V`；下游/最终验证必须依赖 `Task N-V`，而非仅 `Task N`。`inline` 仅用于无下游消费者的低风险本地任务。修复：仅在需要独立验证时创建 `Task N-V`，避免机械地为每个任务复制验证节点。
-12. **技术栈/路由一致性**——根据实际项目技术栈和允许的枚举值验证路由。关卡：`ROUTING_SCHEMA_INVALID`（路由使用不支持的值、把 `skills` 写成 `task(...)` 字段名而非 `load_skills`、或把 `category` 与 `subagent_type` 同时写入同一任务时失败。允许的 `category`：`visual-engineering`、`ultrabrain`、`deep`、`artistry`、`quick`、`unspecified-low`、`unspecified-high`、`writing`。允许的 `subagent_type`：`explore`、`librarian`、`oracle`、`metis`、`momus`）。对于 imported plan 中的上游平台 runtime 标签（如 `sisyphus-junior`），先规范化为本地 authoring surface，再决定是否触发该关卡；不要把平台事实和本地 authoring schema 混为一谈。关卡：`STACK_MISMATCH_BLOCKING`（技术栈声明与可执行任务/QA 路径矛盾且无声明例外时失败）。
-13. **嵌套可执行项关卡**——检测应作为任务节点的可执行嵌套清单/列表项。拒绝在规范化后仍将可执行嵌套工作保留为叙述的计划。
-14. **计划规模审计**——存在含必需字段的 `Plan Size Audit` 块。从 `estimated_waves`/`integration_boundaries` 重新计算。关卡：`PLAN_SIZE_AUDIT_MISSING`（块缺失或声明值 ≠ 计算值时失败）。关卡：`PLAN_SET_REQUIRED`（`Medium`/`Large`/`XLarge` 但不是 `plan-set` 时失败）。
-15. **并行化审计**——优先使用最小内聚可验证结果。计划/计划检查任务需要 `parallel-safe`/`serial-only` 声明。关卡：`PARALLEL_DECLARATION_MISSING`（标签缺失或 `serial-only` 缺少一行约束理由时失败）。拒绝无约束理由的强制串行执行独立任务，也拒绝为了并行而拆开共享接口决策或同一验证面的工作。对于 `Medium`/`Large`/`XLarge`，验证分解为多个计划文件并带阶段级交接关卡。
-16. **验证范围隔离**——需要独立 `Task N-V` 的实现任务不得内联完整验收矩阵或证据证明清单；低风险本地任务允许保留最小验证命令与预期。关卡：`VALIDATION_SCOPE_LEAK`（共享、高风险或有下游消费者的任务把应独立的验证矩阵留在实现体中时失败）。修复：迁移至 `Task N-V`；不得为不需要独立验证的机械任务创建空洞验证节点。
-17. **检查点覆盖**——要求显式 `CP0`/`CP1`/`CP2`/`CP3` 定义。检查点输出必须映射到关卡状态、固定章节和未解决阻塞项。关卡：`CHECKPOINT_MISSING`（节点缺失、无序或未映射到审计输出时失败）。
-18. **索引状态同步**——对于 `plan-set`，索引必须有 Wave/Phase 复选框作为摘要；任务真实状态在阶段文件中。关卡：`INDEX_STATE_SYNC_MISSING`（无复选框、重复任务状态或缺少完成规则时失败）。修复：添加复选框，链接阶段，移除重复任务状态，定义 Phase 完成为所有可执行任务 + 配对验证节点完成，定义 Wave 完成为所有实现任务 + 配对 `Task N-V` 节点完成，若底层任务重新开启则重置受影响的复选框。
-19. **子计划预检验证**——对于 `plan-set`，每个阶段文件必须以预检验证开始，在实现前检查上游阻塞项/契约。关卡：`SUBPLAN_PREFLIGHT_MISSING`（缺失时失败）。
-20. **任务路由层级审计**——贵价层（`deep`、`ultrabrain`、`visual-engineering`、`artistry`）仅用于专业能力；标准层（`unspecified-high`、`unspecified-low`、`quick`、`writing`）作为默认。若一个任务包含可独立验收、可独立失败且适合不同路由的多个结果 → `TASK_UNDER_DECOMPOSED`；若多个碎片共享同一接口决策、不变量和验证面，拆分只增加交接 → `TASK_OVER_DECOMPOSED`。二者均为硬失败。贵价层用于常规任务 → `ROUTING_OVERKILL`。复杂任务路由到 `quick`/`unspecified-low` → `ROUTING_UNDERKILL`（软警告）。修复顺序是先恢复内聚边界，再选择最低可行路由；不得为使用便宜模型而破坏任务连贯性。每个确定路由的任务必须补齐合法 `task(...)` 形状；贵价任务必须包含 `[WHY_NOT_LOWER_COST]`。
+### 计划结构层
+
+1. **TL;DR 完整性** —— `## TL;DR (For humans)` 存在且含六个必填子区块（做什么 / 为什么这个方法 / 不会做什么 / 投入 / 风险 / 关键决策）。关卡：`TLDR_MISSING`。
+2. **Scope 完整性** —— `## Scope` 含 `Scope IN` / `Scope OUT` / `Deferred` 三块；Deferred 项必须显式标注 `BLOCKED on <决策项>`。关卡：`SCOPE_MISSING`。
+3. **Verification strategy 可执行** —— `## Verification strategy` 为三列表格（层级/方法/命令），命令列必须可运行（非模糊叙述）。关卡：`VERIFICATION_STRATEGY_NOT_EXECUTABLE`。
+4. **Workspaces 表一致性** —— 若存在 `### Workspaces` 表，必须含 Lane/Worktree/Path/Branch 四列；每个 lane 在 Todos 中至少出现一次 `workspace_lane`；Todos 中出现的 lane 必须在 Workspaces 表中声明。关卡：`WORKSPACE_TABLE_INCOMPLETE`。
+5. **Routing 枚举合法 + 与可执行 Todo 一一对应** —— Routing 表的 category 列只允许使用「Routing 枚举」中的值；`load_skills` 只允许有效 skill 名或 `[]`。Routing 行必须与 Todos 中的**可执行叶节点**一一对应：(a) 每个可执行叶节点（即 References 不含 `decomposed_into` 的 Todo）必须在 Routing 表中出现且仅出现一次；(b) Routing 表中每个 Task 必须对应一个存在的可执行叶节点；(c) 父编排节点（含 `decomposed_into` 的 Todo）不得出现在 Routing 表中。关卡：`ROUTING_SCHEMA_INVALID`。允许的 `category`：`visual-engineering` / `ultrabrain` / `deep` / `artistry` / `quick` / `unspecified-low` / `unspecified-high` / `writing`。
+6. **Final verification wave 完整** —— 含 `F1` 计划合规 / `F2` 代码质量 / `F3` 全量 QA / `F4` 范围保真四项；多 lane 计划额外含 Lane merge parity 关卡。关卡：`FINAL_VERIFICATION_MISSING`。
+7. **Success criteria 可观测** —— `## Success criteria` 每条必须可独立验证（命令、grep、文件存在、exit code 等），拒绝纯叙述。关卡：`SUCCESS_CRITERIA_VAGUE`。
+
+### Todos 层
+
+8. **Todos 字段完整** —— 每个 Todo 节点含必填字段（References / Scope / Acceptance / QA happy / QA failure / Commit / workspace_lane / category / load_skills）。关卡：`TODO_FIELD_MISSING`。
+9. **QA 可执行性** —— Acceptance / QA happy / QA failure 必须含具体命令 + 可观测预期 + 证据目标；拒绝纯叙述步骤。关卡：`QA_NOT_EXECUTABLE`。
+10. **依赖图闭合** —— `### Dependency matrix` 引用的所有 task ID 必须在 Todos 中存在；Todos 中标注的并行/串行关系必须在 matrix 中体现；移除幻影依赖。关卡：`DEPENDENCY_GRAPH_OPEN`。
+11. **Pre-condition 显式** —— 含 BLOCKING 前置的任务必须用 `Pre-condition（BLOCKING）` 显式标注，并指明 BLOCKING 解除的产出形式。关卡：`PRECONDITION_UNMARKED`。
+12. **范围保真** —— Todos 的 References 与 Scope OUT 不冲突；任何 Todo 不得触碰 Scope OUT 或 Deferred 项。关卡：`SCOPE_LEAK`。
+
+### 高成本任务与 Worktree 层
+
+13. **拆解分析覆盖** —— 对每个 `deep` / `unspecified-high` / `ultrabrain` 任务，必须输出「可拆 / 不可拆」结论；可拆必须注入子任务 + 中间校验点；不可拆必须含 `[WHY_NOT_SPLIT]`。关卡：`DECOMPOSITION_ANALYSIS_MISSING`。
+14. **中间校验点闭合** —— 被拆解为 ≥2 子任务的高成本任务，子任务序列必须含至少一个中间校验点（基线锁定 / 契约对齐 / diff 闭合）；若无则必须含 `[NO_MIDPOINT_JUSTIFIED]`。关卡：`MIDPOINT_MISSING`。
+15. **子任务降级合理** —— 子任务的 `category` 不得高于父任务；降级必须在 Routing 表 WHY 列或任务体写一行理由。关卡：`SUBTASK_CATEGORY_INFLATED`。
+16. **Worktree 前置就绪** —— 触发 worktree 阶段的计划必须含 Wave 0 / Task 0；Task 0 的 Acceptance 覆盖 `git worktree list` / 分支匹配 / 声明的 install 命令（来自 Task 0 的 `package_manager` 字段）三项；QA failure 含从主干建分支协议；多 lane 计划还需校验各 lane base SHA 一致。关卡：`WORKTREE_PREFLIGHT_MISSING`。
+
+### 治理层
+
+17. **平台术语收敛** —— imported plan 中的 `sisyphus-junior` 等上游 runtime 标签必须先规范化为 Routing 表 + category / subagent_type 枚举；不得直接进入执行。关卡：`PLATFORM_TERM_LEAKED`。
+18. **执行命令格式** —— 输出含 `/start-work <plan-name>`（plan-name 为计划文件名不含扩展名），可附 options `--worktree <path>` / `--make-pr` / `--ship`；plan-name 必须与计划 `# <plan-id> - Work Plan` 中的 plan-id 一致。关卡：`START_WORK_COMMAND_MALFORMED`。
+
+### 上游对齐层（按已加载的上游契约做缺口识别）
+
+19. **顶层 workspaces 身份完整** —— `## Workspaces` 顶层章节存在；每个 lane 条目含 `name` / `path` / `branch` 三项身份字段；单 lane 计划也必须给全身份（不简化为 `single-lane` 字符串）。关卡：`WORKSPACE_IDENTITY_MISSING`。修复方向：把 `### Workspaces`（在 `## Execution strategy` 下）四列表的身份字段提升为顶层 `## Workspaces` 条目。
+20. **Handoff 章节存在** —— `## Handoff` 章节含五个子区块（计划路径 / 版本 / 当前状态 / 未决事项 / 执行入口）。关卡：`HANDOFF_MISSING`。修复方向：注入骨架章节；执行入口派生自 plan-id 与可选 options。
+21. **Evidence 字段对齐** —— 每个可执行 Todo 含 `Evidence` 字段，指向具体产物路径。关卡：`EVIDENCE_PATH_MISSING`。
+22. **Todo 编号体系一致** —— 全文 Todo 编号统一为 `N.`（正十进制整数）或 `T#` 一种体系；`### Dependency matrix` 引用必须匹配该体系；不允许小数后缀。关卡：`TODO_ID_SCHEME_INCONSISTENT`（软警告）。
+23. **`mode: worktree` 字段对齐** —— 若计划含多 lane，应在 `## Workspaces` 或顶层声明 `mode: worktree`（具体字段形态以上游 atlas.md 最新定义为准）；单 lane 可选。关卡：`WORKTREE_MODE_UNDECLARED`（软警告）。
+24. **Routing 派发器表达** —— Routing 表能表达 `category` XOR `subagent_type` + executor 兜底；不能表达则触发软警告 `ROUTING_DISPATCHER_UNSUPPORTED`，提示按 omo-adaptive-execution 最新规范对齐。
 
 ## 修复顺序
 
-1. 执行 skill 头部、执行者注解、路由枚举
-2. 用户摘要（`## User-Facing Summary`、`Development Core`、`User Requirements`）
-3. 防漂移顶部章节（`## User Requirement Digest`、`## Intent Anchor`）
-4. 规范契约漂移（`interface_prefix`、`versioning_scheme`、`evidence_root`、范围）
-5. 检查点映射（`CP0`/`CP1`/`CP2`/`CP3`）和输出模式
-6. 统一任务图（ID + 依赖）
-7. 展平嵌套可执行工作
-8. 计划规模审计和分解决策
-9. 验证闭合（`Task N`/`Task N-V`）；从 `Task N` 剥离验收标准 → 迁移至 `Task N-V` QA 块
-10. Plan-Set 索引状态模型（Wave/Phase 复选框 + 完成同步）；在创建 `Task N-V` 或节点重新开启后重新计算
-11. 子计划预检验证阶段（仅 plan-set）
-12. QA 可执行性和验证范围隔离
-13. 检查点循环至闭合（`CP1`→`CP2`→`CP3`）和硬关卡重评估
-14. 任务内聚性与路由层级审计：拆分真正独立结果，合并过度碎片，再修正过度配置
+1. `## TL;DR (For humans)` 六子区块补齐
+2. `## Scope` 三子区块补齐；Deferred 项标注 BLOCKED
+3. `## Verification strategy` 表格化与命令可执行化
+4. `## Execution strategy`：
+   - `### Workspaces` 表识别或骨架注入（含 Lane/Worktree/Path/Branch 四列）
+   - `### Dependency matrix` 编译为闭合图
+   - `### Routing` 表 category / load_skills 枚举规范化
+5. **Worktree 触发判定** → 若触发，注入或补齐 Wave 0 / Task 0（含从主干建分支协议）
+6. `## Todos` 字段完整性（References / Scope / Acceptance / QA happy / QA failure / Commit / workspace_lane / category / load_skills）
+7. **高成本任务拆解分析**：识别 deep / unspecified-high / ultrabrain → 分析维度 → 可拆则注入子任务 + 中间校验点；不可拆则附 `[WHY_NOT_SPLIT]`
+8. `## Final verification wave` F1-F4 补齐；多 lane 计划强化 Lane merge parity
+9. `## Commit strategy` 与 `## Success criteria` 与 Todos 一致
+10. 第二轮硬关卡重评估
 
 ## 输出要求
 
@@ -141,17 +339,18 @@ Plan-Set 文件结构：子计划文件直接放在原始计划文件同一目�
 - `Verdict`：`PASS` 或 `REJECT`
 - `Gate Summary`：按关卡码统计的失败硬关卡数
 - `Hard Gates`：关卡码 + 失败章节列表
-- `Warnings`：非阻塞质量问题
+- `Warnings`：非阻塞质量问题（含软警告码）
 - `Fixed Sections`：已修改的确切章节
 - `Needs Decision`：需要人工产品/契约决策的条目
-- `Checkpoint Report`：CP0/CP1/CP2/CP3 状态、循环迭代次数、未解决阻塞项
-- `User-Facing Summary`：确认 `Development Core` 和 `User Requirements` 在顶部附近以用户可读语言存在
-- `Requirement Digest`：确认 `## User Requirement Digest` 保留用户的自然语言需求无漂移
-- `Intent Anchor`：确认 `## Intent Anchor` 一致地捕获 `Why`/`What`/`Non-Goals`/`Must Not Drift`
-- `Validation Scope`：确认验收/证据检查已隔离到验证任务/检查点
-- `Plan Size`：计算的类别、声明的类别和分解判定
-- `Index State`：对于 `plan-set`，确认 Wave/Phase 复选框存在、完成/重置标准已定义、勾选状态与阶段文件真实状态匹配
-- `Start-Work Command`：确认输出中包含带文件名的完整 `/start-work <filename>` 执行命令；`plan-set` 使用索引文件名，`single-file` 使用计划文件名
+- `TL;DR Confirmed`：确认 `## TL;DR (For humans)` 六子区块在顶部就位
+- `Scope Confirmed`：确认 `## Scope` 含 IN/OUT/Deferred 三块且 Deferred 标 BLOCKED
+- `Worktree Preflight`：是否触发、注入了哪些 lane 的 Wave 0 / Task 0、主干分支名、哪些 lane 已就绪 / 待创建
+- `Task Decomposition Report`：列出每个被分析的高成本任务——结论（可拆/不可拆）、拆出的子任务编号、注入的中间校验点编号、降级的 category、或不拆的 `[WHY_NOT_SPLIT]` 理由
+- `Dependency Matrix`：编译后的依赖图与并行结构摘要
+- `Routing Audit`：category / subagent_type 枚举合法性、贵价任务 WHY 列理由是否就位、executor 兜底声明是否滥用
+- `Upstream Contract Self-Check`：5 个上游契约的加载状态（已加载 / `UPSTREAM_SOURCE_UNAVAILABLE`）+ 各自对齐检查的缺口摘要
+- `Handoff Explanation`：六元素——`What this plan drives`（计划驱动什么）/ `End state`（最终态）/ `Shape`（N impl + F final-verifier）/ `Added beyond the request`（在用户请求外补强的内容）/ `Verification`（F1-F4 + 上游对齐检查）/ `Execution handoff`（`/start-work <plan-name>` 含可选 options）
+- `Start-Work Command`：完整 `/start-work <plan-name>` 命令（含 options `--worktree <path>` / `--make-pr` / `--ship` 若适用）
 
 任何 `BLOCKED_NEEDS_DECISION` 条目仍开放 → 判定必须为 `REJECT`。
 
@@ -159,16 +358,20 @@ Plan-Set 文件结构：子计划文件直接放在原始计划文件同一目�
 
 ### 硬关卡（必须为零才能 PASS）
 
-`ID_GRAPH_MISMATCH` · `ROUTING_SCHEMA_INVALID` · `TASK_SHAPE_INCOMPLETE` · `CONTRACT_DRIFT` · `QA_NOT_EXECUTABLE` · `VERIFY_CLOSURE_MISSING` · `STACK_MISMATCH_BLOCKING` · `NESTED_EXECUTABLES_FOUND` · `PLAN_SIZE_AUDIT_MISSING` · `PLAN_SET_REQUIRED` · `PARALLEL_DECLARATION_MISSING` · `CHECKPOINT_MISSING` · `VALIDATION_SCOPE_LEAK` · `USER_SUMMARY_MISSING` · `ANTI_DRIFT_TOP_SECTION_MISSING` · `INDEX_STATE_SYNC_MISSING` · `SUBPLAN_PREFLIGHT_MISSING` · `ROUTING_OVERKILL` · `TASK_UNDER_DECOMPOSED` · `TASK_OVER_DECOMPOSED`
+`TLDR_MISSING` · `SCOPE_MISSING` · `VERIFICATION_STRATEGY_NOT_EXECUTABLE` · `WORKSPACE_TABLE_INCOMPLETE` · `ROUTING_SCHEMA_INVALID` · `FINAL_VERIFICATION_MISSING` · `SUCCESS_CRITERIA_VAGUE` · `TODO_FIELD_MISSING` · `QA_NOT_EXECUTABLE` · `DEPENDENCY_GRAPH_OPEN` · `PRECONDITION_UNMARKED` · `SCOPE_LEAK` · `DECOMPOSITION_ANALYSIS_MISSING` · `MIDPOINT_MISSING` · `SUBTASK_CATEGORY_INFLATED` · `WORKTREE_PREFLIGHT_MISSING` · `BASE_SHA_DIVERGENT` · `PLATFORM_TERM_LEAKED` · `START_WORK_COMMAND_MALFORMED` · `WORKSPACE_IDENTITY_MISSING` · `HANDOFF_MISSING` · `EVIDENCE_PATH_MISSING`
 
 ### 软警告
 
-`ROUTING_HEURISTIC_WEAK` · `THRESHOLD_UNJUSTIFIED` · `NOISY_VERIFICATION` · `ROUTING_UNDERKILL`
+`ROUTING_UNDERKILL` · `ROUTING_OVERKILL` · `TASK_MAY_UNDER_DECOMPOSE` · `VERIFICATION_REDUNDANT` · `MIDPOINT_EXCESSIVE` · `TLDR_DRIFT_AFTER_SPLIT` · `PKG_MANAGER_UNDECLARED` · `TRUNK_DIRTY` · `TRUNK_UNPUSHED` · `PARALLEL_WRITESET_OVERLAP` · `TODO_ID_SCHEME_INCONSISTENT` · `WORKTREE_MODE_UNDECLARED` · `ROUTING_DISPATCHER_UNSUPPORTED`
+
+`TLDR_DRIFT_AFTER_SPLIT` 触发条件：拆解改变了 TL;DR 中**投入量级**（如 1 个 ultrabrain 拆为 3 个 unspecified-low，关键人力分布变化）、**风险等级**或**关键路径**（如拆解引入新的并行路径），但 TL;DR 的「投入」/「风险」/「关键决策」子区块未相应更新。
+
+`ROUTING_DISPATCHER_UNSUPPORTED` 触发条件：Routing 表格式无法表达 `subagent_type` 或 executor 兜底语义（如计划只允许 category 列）；不阻断，提示按 omo-adaptive-execution 最新规范扩展列定义。
 
 ## 提级流程
 
-1. 自动修复确定性文本问题（ID 重映射、显式依赖边、头部枚举修正、契约对齐）。
-2. 高影响的模糊产品决策 → 问 1-3 个定向问题；若仍不确定 → `BLOCKED_NEEDS_DECISION`。示例：选择 `/api/` vs `/api/v1/`、是否将某功能纳入或排除出验证范围、用户需求和意图锚点无法一致映射。
+1. 自动修复确定性文本问题（章节骨架、字段补齐、枚举修正、依赖边显式化）。
+2. 高影响的模糊产品决策 → 问 1-3 个定向问题；若仍不确定 → `BLOCKED_NEEDS_DECISION`。示例：选择 `/api/` vs `/api/v1/`、是否将某功能纳入或排除出 Scope IN、Deferred 项的 BLOCKED 决策无法定位。
 3. 绝不猜测业务意图来「强制通过」。
 
 ## 与 Atlas/Prometheus 集成
