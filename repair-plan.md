@@ -102,7 +102,7 @@ Routing 表的 Task 行必须用 `category` **或** `subagent_type` 二选一声
 
 `load_skills` 仅允许使用项目有效 skill 名（见 skills 索引）或 `[]`。
 
-每个任务节点必须以 `category` 或 `subagent_type` 声明执行者（或显式兜底）。`load_skills` 默认 `[omo-adaptive-execution]`；做产品代码语义工作的任务应追加 `serena-first-codework`。
+每个任务节点必须以 `category` 或 `subagent_type` 声明执行者（或显式兜底）。`load_skills` 默认 `[omo-adaptive-execution]`。
 
 Routing 表若无法表达 `subagent_type` 或兜底语义 → 触发软警告 `ROUTING_DISPATCHER_UNSUPPORTED`（不阻断，提示按 omo-adaptive-execution 最新规范对齐）。
 
