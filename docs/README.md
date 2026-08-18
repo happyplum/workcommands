@@ -11,11 +11,12 @@ oh-my-opencode 的文件式 OpenCode commands 仓库。这里存放显式手动�
 - `cleanup-sisyphus.md` → `/cleanup-sisyphus`
 - `doc-sync.md` → `/doc-sync`
 - `shipped.md` → `/shipped`
+- `serena-archive.md` → `/serena-archive`
 
 ## 设计定位
 
 - `commands/` 是**手动执行面**：负责参数解释、操作协议、成功标准与最终报告。
-- `/repair-plan`、`/restructure-memory`、`/cleanup-sisyphus` 与 `/doc-sync` 现在都是**自包含 command**：命令文件自身持有完整执行协议，不再依赖匹配 skill 作为规则载体。
+- `/repair-plan`、`/restructure-memory`、`/cleanup-sisyphus` 与 `/doc-sync` 现在都是**自包含 command**：命令文件自身持有完整执行协议，不再依赖匹配 skill 作为规则载体。`/shipped` 与 `/serena-archive` 同样是自包含 command。
 - command 文档、目录结构、入口命名与命令级行为说明继续由本仓库维护。
 
 ## 命令列表
@@ -27,6 +28,7 @@ oh-my-opencode 的文件式 OpenCode commands 仓库。这里存放显式手动�
 | `/cleanup-sisyphus` | 审计并清理 `.omo` / `.sisyphus` 工作区与 `docs/` 中的 Agent 执行产物，同时保留必要的长期知识和用户文档 | 当前工作区 `.omo` / `.sisyphus`，以及存在时的 `docs/` |
 | `/doc-sync` | 审计并可选修复文档、计划文件与持久化记忆，使其重新对齐已验证的代码现实 | 默认使用当前变更范围；可通过 `range=<git-range>`、`carrier=<category>` 或 `fix` 收窄 |
 | `/shipped` | 为任意项目初始化和维护功能单元计划与 shipped 事实清单，防止实现回退与规格漂移 | 无参数时自动判断项目场景并提问确认；也可带 `check` 或单元名 |
+| `/serena-archive` | 将 `.serena/memories/` 中已实现的事实型记忆落库到项目文档，然后整体删除 `.serena` 目录 | 无参数执行全流程；`--dry-run` 只评估；`--keep` 落库后保留 `.serena` |
 
 ## 参考索引
 
