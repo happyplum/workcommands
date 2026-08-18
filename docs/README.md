@@ -10,6 +10,7 @@ oh-my-opencode 的文件式 OpenCode commands 仓库。这里存放显式手动�
 - `restructure-memory.md` → `/restructure-memory`
 - `cleanup-sisyphus.md` → `/cleanup-sisyphus`
 - `doc-sync.md` → `/doc-sync`
+- `shipped.md` → `/shipped`
 
 ## 设计定位
 
@@ -25,6 +26,7 @@ oh-my-opencode 的文件式 OpenCode commands 仓库。这里存放显式手动�
 | `/restructure-memory` | 对项目持久化记忆做结构重组，保留 durable knowledge | 从参数、当前任务或可复用 memory inventory 推断范围 |
 | `/cleanup-sisyphus` | 审计并清理 `.omo` / `.sisyphus` 工作区与 `docs/` 中的 Agent 执行产物，同时保留必要的长期知识和用户文档 | 当前工作区 `.omo` / `.sisyphus`，以及存在时的 `docs/` |
 | `/doc-sync` | 审计并可选修复文档、计划文件与持久化记忆，使其重新对齐已验证的代码现实 | 默认使用当前变更范围；可通过 `range=<git-range>`、`carrier=<category>` 或 `fix` 收窄 |
+| `/shipped` | 为任意项目初始化和维护功能单元计划与 shipped 事实清单，防止实现回退与规格漂移 | 无参数时自动判断项目场景并提问确认；也可带 `check` 或单元名 |
 
 ## 参考索引
 
