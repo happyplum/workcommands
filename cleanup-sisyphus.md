@@ -1,6 +1,6 @@
 ---
 description: Audit and clean the .sisyphus / .omo workspace and docs/ directory, with an explicit full-purge mode that preserves current durable documentation in docs/.
-subtask: true
+subtask: false
 ---
 
 You are executing the `/cleanup-sisyphus` command.
@@ -45,13 +45,13 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 ## 编排与阶段门禁（MUST）
 
-本节是**执行骨架**；与后文「执行顺序」「防遗漏硬门禁」冲突时，**以本节阶段门禁为准**。  
-`/cleanup-sisyphus` 是**多阶段编排命令**，不是「边读 plan 边删」的单循环。  
+本节是**执行骨架**；与后文「执行顺序」「防遗漏硬门禁」冲突时，**以本节阶段门禁为准**。
+`/cleanup-sisyphus` 是**多阶段编排命令**，不是「边读 plan 边删」的单循环。
 **任一前序阶段未闭合 → 禁止进入后序阶段；阶段 3 未放行 → 禁止任何删除 dry-run / 删除。**
 
 ### 阶段 0 — 探测
 
-按「目录探测」确定 `$WORKSPACE`（`.omo` / `.sisyphus`）与 `docs/`；需要时执行迁移协议准备。  
+按「目录探测」确定 `$WORKSPACE`（`.omo` / `.sisyphus`）与 `docs/`；需要时执行迁移协议准备。
 本阶段只确认目标是否存在，不分类、不删除。
 
 ### 阶段 1 — 父级只读「项目列表」（轻量，MUST 先做）
@@ -67,7 +67,7 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 | 状态线索 | `boulder.json` 中 works 的 slug↔status 摘要（**仅线索**） |
 | 可选 | 已注册 worktree 名、根孤儿文件名列表 |
 
-**本阶段允许**：列目录、读 plan 标题/Goal 摘要、计 checkbox 数、读 boulder 摘要。  
+**本阶段允许**：列目录、读 plan 标题/Goal 摘要、计 checkbox 数、读 boulder 摘要。
 **本阶段禁止**：
 
 - 对产品代码做深度完成度裁决（大范围 grep/codegraph 实现核对）
@@ -93,7 +93,7 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 - **按 plan 分片**：每个分析 task 负责 **1 个 slug**，或 **一组明确重叠交付**的 slug（例如同一功能的 `qr-create-retry-fallback` + `qr-create-serial-restart-fix`）；禁止把无关 plan 塞进同一 task。
 - **并行**：独立 plan 可并行派发；写入并发上限不适用（本波**只读**）。建议同时在飞分析 task ≤ 3，其余 pending。
-- **路由**：优先 `subagent_type="explore"` 或 category `quick` / `unspecified-low` 的**只读**分析；`load_skills` 按需。  
+- **路由**：优先 `subagent_type="explore"` 或 category `quick` / `unspecified-low` 的**只读**分析；`load_skills` 按需。
   prompt **必须英文六段**（CONTEXT / GOAL / STOP WHEN / EVIDENCE / DOWNSTREAM / REQUEST）。
 
 #### 2.3 子代理契约（每个分析 task）
@@ -127,7 +127,7 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
    - **不进入删除、直接收工**：无可清理候选，且用户未要求全量清理 → 输出项目列表 + 裁决表 +「无需删除」证明，**结束命令**。
 4. 用户约束「只清已完成 / 未完成不要动」：用 `unfinished_slugs` 的**精确引用闭包**保护；**不得**把约束收窄成「只删同名附属」。
 
-**阶段 3 出口物**：裁决表 + 放行/不放行声明 +（若放行）拟清理候选范围摘要。  
+**阶段 3 出口物**：裁决表 + 放行/不放行声明 +（若放行）拟清理候选范围摘要。
 **未放行 → 禁止阶段 4。**
 
 ### 阶段 4 — 整理删除（仅阶段 3 放行后）
@@ -189,7 +189,7 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 ### 3. 计划完成度判定（MUST）— 项目现实优先，禁止 checkbox 首判
 
-**核心原则**：plan 文本（checkbox、Status 字段、draft 状态、boulder）只是**线索**，不是裁决。裁决唯一依据是 **`.omo` 之外的项目现实**：代码、测试、配置、用户/维护者文档、Git 历史、issue tracker。  
+**核心原则**：plan 文本（checkbox、Status 字段、draft 状态、boulder）只是**线索**，不是裁决。裁决唯一依据是 **`.omo` 之外的项目现实**：代码、测试、配置、用户/维护者文档、Git 历史、issue tracker。
 「open checkbox 很多」**不得**单独把 plan 标为未完成；「全部 `[x]`」也只是支持完成的线索，最终仍须核对现实（防误勾）。
 
 #### 3.1 每个 plan 必填判定卡
@@ -264,21 +264,21 @@ Treat `$ARGUMENTS` as the cleanup scope, target subdirectory, or any extra reten
 
 对每个盘点条目严格按序判定，命中即停：
 
-1. 是否属于**项目现实证实**的未完成活跃根或其**精确引用闭包**？→ 保留  
-2. 是否为**已完成 plan** 或其余已完成附属？→ 知识提取后删除  
-3. 是否为**临时产物**（evidence/draft/notepad/截图/评审导出/执行日志/根孤儿媒体）？→ 知识提取后删除  
-4. 是否为**已转换证据**？→ 删除原件  
-5. 以上皆否 → **未知**，保留并报告  
+1. 是否属于**项目现实证实**的未完成活跃根或其**精确引用闭包**？→ 保留
+2. 是否为**已完成 plan** 或其余已完成附属？→ 知识提取后删除
+3. 是否为**临时产物**（evidence/draft/notepad/截图/评审导出/执行日志/根孤儿媒体）？→ 知识提取后删除
+4. 是否为**已转换证据**？→ 删除原件
+5. 以上皆否 → **未知**，保留并报告
 
 ### 6. 删除前覆盖率报告（MUST）
 
 dry-run 清单之前必须输出：
 
-- 各强制桶盘点计数  
-- 每个 plan 的裁决表：`slug | 裁决 | open/done | 关键现实证据 | 未完成缺口(若有)`  
-- `completed_slugs` / `unfinished_slugs` / `unknown_slugs`（过程性残留须注明已忽略）  
-- KEEP / DELETE / UNKNOWN 计数且与盘点总数相等  
-- 明确声明：未使用「仅同名附属」捷径；未使用 boulder 作活跃根；**未使用 checkbox-first**；对 open 很多的 plan 已做现实核对  
+- 各强制桶盘点计数
+- 每个 plan 的裁决表：`slug | 裁决 | open/done | 关键现实证据 | 未完成缺口(若有)`
+- `completed_slugs` / `unfinished_slugs` / `unknown_slugs`（过程性残留须注明已忽略）
+- KEEP / DELETE / UNKNOWN 计数且与盘点总数相等
+- 明确声明：未使用「仅同名附属」捷径；未使用 boulder 作活跃根；**未使用 checkbox-first**；对 open 很多的 plan 已做现实核对
 
 缺任一项 → 不得删除。
 
@@ -302,17 +302,17 @@ dry-run 清单之前必须输出：
 
 #### 7.2 默认可删、无需进 docs 的内容
 
-- 执行日志、会话 ID、WIP checkbox 清单、阶段汇报、「做过什么」时间线  
-- 已转换的截图 / visual-QA / HTML 报告（事实已在代码或 docs）  
-- 纯过程性 draft 元数据（`ready-for-handoff` 等）  
-- 与代码/测试/已有 docs 完全重复的段落  
+- 执行日志、会话 ID、WIP checkbox 清单、阶段汇报、「做过什么」时间线
+- 已转换的截图 / visual-QA / HTML 报告（事实已在代码或 docs）
+- 纯过程性 draft 元数据（`ready-for-handoff` 等）
+- 与代码/测试/已有 docs 完全重复的段落
 
 #### 7.3 落地落点优先级（MUST）
 
-1. **已有主题文档**：`docs/architecture/*`、`docs/process/*`、owner-local shipped、README、既有 ADR  
-2. **同主题扩展**：在现有目录下**更新**对应文件，禁止另起第二事实来源  
-3. **最小新建（允许）**：若确有 7.1 类唯一事实、且**没有任何**合适既有文件可挂靠，允许在 `docs/` 下创建**一个**主题明确的新文件（如 `docs/architecture/<topic>.md` 或项目已有 shipped 归口目录下的单一清单）；**禁止**新建整棵「推荐文档树」或 `docs/agent-dump/` 类垃圾桶  
-4. **记忆（仅补充）**：仅 `guardrails` / 短 `reference` 等 Agent 防回归提示可进记忆；且**不得**替代步骤 1–3 对 7.1 类事实的 docs 落地  
+1. **已有主题文档**：`docs/architecture/*`、`docs/process/*`、owner-local shipped、README、既有 ADR
+2. **同主题扩展**：在现有目录下**更新**对应文件，禁止另起第二事实来源
+3. **最小新建（允许）**：若确有 7.1 类唯一事实、且**没有任何**合适既有文件可挂靠，允许在 `docs/` 下创建**一个**主题明确的新文件（如 `docs/architecture/<topic>.md` 或项目已有 shipped 归口目录下的单一清单）；**禁止**新建整棵「推荐文档树」或 `docs/agent-dump/` 类垃圾桶
+4. **记忆（仅补充）**：仅 `guardrails` / 短 `reference` 等 Agent 防回归提示可进记忆；且**不得**替代步骤 1–3 对 7.1 类事实的 docs 落地
 
 全量清理模式的「文档先落地」与本条一致；普通清理**同样**适用 7.1–7.3，不得因「非全量」跳过 docs。
 
@@ -320,10 +320,10 @@ dry-run 清单之前必须输出：
 
 对任一 DELETE 候选：
 
-- 扫描出 7.1 类**独特**事实 → 必须先完成 7.3 写入/更新，并在处置清单记录 `docs 落点路径`  
-- 落点未写、写后未核对「源文件无新增唯一事实残留」→ **该路径禁止进入 dry-run DELETE 集**，改标 KEEP 或 UNKNOWN 并报告  
-- 不确定是否「独特 / 仍准确」→ **保留源文件**，不得猜测删除  
-- 覆盖率报告必须增加：`知识落地表`（源路径 | 事实摘要 | docs 落点或「无需/已覆盖」| 核验）  
+- 扫描出 7.1 类**独特**事实 → 必须先完成 7.3 写入/更新，并在处置清单记录 `docs 落点路径`
+- 落点未写、写后未核对「源文件无新增唯一事实残留」→ **该路径禁止进入 dry-run DELETE 集**，改标 KEEP 或 UNKNOWN 并报告
+- 不确定是否「独特 / 仍准确」→ **保留源文件**，不得猜测删除
+- 覆盖率报告必须增加：`知识落地表`（源路径 | 事实摘要 | docs 落点或「无需/已覆盖」| 核验）
 
 缺知识落地表或表中有未闭合行 → **禁止删除**。
 
@@ -643,9 +643,9 @@ dry-run 清单之前必须输出：
 
 对拟删除源中的知识：
 
-1. 先判断是否属 §7.1（架构/设计/契约等）→ **若是，先落地 `docs/`**，记忆步骤可选且不能替代  
-2. 再：`list_memories` → `read_memory` 检查重叠 → 决定（保留已有/更新已有/新建短 guardrail/不操作）  
-3. docs 与（可选）记忆均完成后，才允许该源路径进入 DELETE  
+1. 先判断是否属 §7.1（架构/设计/契约等）→ **若是，先落地 `docs/`**，记忆步骤可选且不能替代
+2. 再：`list_memories` → `read_memory` 检查重叠 → 决定（保留已有/更新已有/新建短 guardrail/不操作）
+3. docs 与（可选）记忆均完成后，才允许该源路径进入 DELETE
 
 **禁止存储到记忆**：会话 ID、一次性执行日志、临时审计笔记、验证输出文本、大量复制的计划历史、**完整架构专章（应去 docs）**
 
