@@ -1,6 +1,6 @@
 ---
 description: Repair, normalize, and finalize a reviewed or imported execution plan before downstream execution.
-subtask: true
+subtask: false
 ---
 
 You are executing the `/repair-plan` command.

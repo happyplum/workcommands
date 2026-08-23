@@ -1,6 +1,6 @@
 ---
 description: Synchronize verified, reusable project knowledge into shared docs/ and prune redundant private tool memories after major implementation, refactor, or plan completion.
-subtask: true
+subtask: false
 ---
 
 You are executing the `/doc-sync` command.

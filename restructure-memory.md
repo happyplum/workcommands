@@ -1,6 +1,6 @@
 ---
 description: Restructure bloated or overlapping project memories without losing durable knowledge.
-subtask: true
+subtask: false
 ---
 
 You are executing the `/restructure-memory` command.
